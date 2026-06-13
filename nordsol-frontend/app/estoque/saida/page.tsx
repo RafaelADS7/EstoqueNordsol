@@ -55,7 +55,13 @@ export default function SaidaProdutos() {
   const [produtosDB, setProdutosDB] = useState<ProdutoDB[]>([]);
   const [kitsDB, setKitsDB] = useState<KitDB[]>([]);
   const [carregando, setCarregando] = useState(true);
+  
   const [filtroOS, setFiltroOS] = useState('');
+  // NOVOS ESTADOS PARA O FILTRO DE DATA
+  const [dataInicial, setDataInicial] = useState('');
+  const [dataFinal, setDataFinal] = useState('');
+  // NOVO: Estado para o filtro de status
+  const [filtroStatus, setFiltroStatus] = useState('');
 
   // ----------------------------------------------------------------------
   // 2. ESTADOS DO MODAL DE REGISTRO
@@ -371,15 +377,40 @@ export default function SaidaProdutos() {
     return new Date(dataString).toLocaleDateString('pt-BR');
   };
 
-  const listaFiltrada = filtroOS 
-    ? listaOS.filter(os => os.id.toString() === filtroOS) 
-    : listaOS;
+  // LÓGICA DE FILTRAGEM COMBINADA (O.S. + Datas)
+  const listaFiltrada = listaOS.filter(os => {
+    // 1. Filtro por ID da O.S.
+    if (filtroOS && os.id.toString() !== filtroOS) {
+      return false;
+    }
+
+    // A data_programada no banco geralmente vem no formato "YYYY-MM-DD"
+    // O input do tipo "date" do HTML também usa "YYYY-MM-DD", facilitando a comparação.
+    
+    // 2. Filtro por Data Inicial
+    if (dataInicial && os.data_programada < dataInicial) {
+      return false;
+    }
+
+    // 3. Filtro por Data Final
+    if (dataFinal && os.data_programada > dataFinal) {
+      return false;
+    }
+
+    // 4. Filtro por Status
+    if (filtroStatus && os.status !== filtroStatus) {
+      return false;
+    }
+
+    return true; // Se passou por todas as validações, mostra na tabela
+  });
 
   return (
     <div className="w-full font-sans mt-4">
-      
-      {/* BARRA SUPERIOR */}
+{/* BARRA SUPERIOR */}
       <div className="flex flex-wrap items-center gap-4 mb-6">
+        
+        {/* FILTRO DE O.S. */}
         <select 
           className="border border-gray-300 rounded p-2 text-sm text-gray-700 min-w-[250px] focus:outline-none focus:ring-1 focus:ring-[#102A43] bg-white"
           value={filtroOS}
@@ -390,22 +421,58 @@ export default function SaidaProdutos() {
             <option key={os.id} value={os.id}>O.S: {os.numero_os} {os.cliente ? `— ${os.cliente}` : ''}</option>
           ))}
         </select>
+
+        {/* NOVO: FILTRO DE STATUS */}
+        <select 
+          className="border border-gray-300 rounded p-2 text-sm text-gray-700 min-w-[160px] focus:outline-none focus:ring-1 focus:ring-[#102A43] bg-white"
+          value={filtroStatus}
+          onChange={(e) => setFiltroStatus(e.target.value)}
+        >
+          <option value="">Todos os Status</option>
+          <option value="PENDENTE">Pendente</option>
+          <option value="RUA">Em Rua</option>
+          <option value="FINALIZADA">Finalizada</option>
+          <option value="CANCELADA">Cancelada</option>
+        </select>
         
+        {/* INPUT DATA INICIAL */}
         <div className="flex border border-gray-300 rounded overflow-hidden">
-          <input type="text" placeholder="Data Inicial" className="p-2 text-sm outline-none" />
+          <input 
+            type="date" 
+            className="p-2 text-sm outline-none text-gray-600" 
+            value={dataInicial}
+            onChange={(e) => setDataInicial(e.target.value)}
+          />
           <div className="bg-[#102A43] p-2 flex items-center justify-center">
              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-white" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clipRule="evenodd" /></svg>
           </div>
         </div>
 
+        {/* INPUT DATA FINAL */}
         <div className="flex border border-gray-300 rounded overflow-hidden">
-          <input type="text" placeholder="Data Final" className="p-2 text-sm outline-none" />
+          <input 
+            type="date" 
+            className="p-2 text-sm outline-none text-gray-600" 
+            value={dataFinal}
+            onChange={(e) => setDataFinal(e.target.value)}
+          />
           <div className="bg-[#102A43] p-2 flex items-center justify-center">
              <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-white" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M6 2a1 1 0 00-1 1v1H4a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2h-1V3a1 1 0 10-2 0v1H7V3a1 1 0 00-1-1zm0 5a1 1 0 000 2h8a1 1 0 100-2H6z" clipRule="evenodd" /></svg>
           </div>
         </div>
 
-        <button onClick={() => setFiltroOS('')} className="bg-[#102A43] text-white px-6 py-2 rounded text-sm font-medium hover:bg-opacity-90">Limpar</button>
+        {/* BOTÃO LIMPAR ATUALIZADO (agora zera o filtro de status também) */}
+        <button 
+          onClick={() => {
+            setFiltroOS('');
+            setDataInicial('');
+            setDataFinal('');
+            setFiltroStatus(''); // <-- LIMPA O STATUS
+          }} 
+          className="bg-[#102A43] text-white px-6 py-2 rounded text-sm font-medium hover:bg-opacity-90"
+        >
+          Limpar
+        </button>
 
         <button onClick={() => setModalAberto(true)} className="bg-emerald-600 text-white px-6 py-2 rounded text-sm font-medium hover:bg-emerald-700 flex items-center gap-2 ml-auto">
           <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
