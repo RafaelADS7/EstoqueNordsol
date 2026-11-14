@@ -2,32 +2,37 @@
 
 import React, { useState, useEffect } from 'react';
 
-// Define como é o formato do dado que a interface espera
+// Formato dos dados que a interface espera
 interface Produto {
   id: string | number;
   data_cadastro: string;
+  data_cadastro_raw: string | null; // Guardado para fazer a filtragem de datas exata
   codigo: string;
   nome: string;
   fornecedor: string;
   marca: string;
   quantidade: number;
+  unidade: string;
   qtd_minima: number;
   valor_unitario: string;
   valor_total: string;
 }
 
 export default function ProdutosCadastradosPage() {
-  // Estados para guardar os dados do backend e o status de carregamento
   const [produtos, setProdutos] = useState<Produto[]>([]);
   const [carregando, setCarregando] = useState(true);
 
-  // Função para buscar os dados na sua API Django
+  // --- ESTADOS DA PESQUISA E FILTROS ---
+  const [termoBusca, setTermoBusca] = useState('');
+  const [dataInicio, setDataInicio] = useState('');
+  const [dataFim, setDataFim] = useState('');
+
+  // Busca os dados da API Django
   useEffect(() => {
     async function carregarProdutos() {
       try {
         setCarregando(true);
         
-        // Chamada real para o seu backend
         const response = await fetch('http://localhost:8000/api/produtos/');
         if (!response.ok) {
           throw new Error('Falha na resposta do servidor');
@@ -35,23 +40,23 @@ export default function ProdutosCadastradosPage() {
         
         const dados = await response.json();
         
-        // Mapeando os dados do Django para o formato da sua tabela
         const produtosFormatados: Produto[] = dados.map((p: any) => {
           const precoUn = Number(p.preco_custo || 0);
           const qtd = Number(p.estoque_atual || 0);
-          const total = precoUn * qtd;
+          const qtdMin = Number(p.quantidade_minima || 0);
+          const total = p.valor_total !== undefined ? Number(p.valor_total) : (precoUn * qtd);
 
           return {
             id: p.id,
-            // Formata a data se existir, senão coloca um traço
             data_cadastro: p.data_cadastro ? new Date(p.data_cadastro).toLocaleDateString('pt-BR') : '-',
-            codigo: p.codigo || p.id.toString(),
+            data_cadastro_raw: p.data_cadastro || null,
+            codigo: p.sku_codigo || p.id.toString(),
             nome: p.nome,
-            fornecedor: p.fornecedor || 'Não Informado',
-            marca: p.marca || 'Não Informada',
+            fornecedor: p.fornecedor || 'NÃO INFORMADO',
+            marca: p.marca || 'NÃO INFORMADA',
             quantidade: qtd,
-            qtd_minima: p.estoque_minimo || 0,
-            // Formata os valores para Reais (R$)
+            unidade: p.unidade || 'UN',
+            qtd_minima: qtdMin,
             valor_unitario: `R$ ${precoUn.toFixed(2).replace('.', ',')}`,
             valor_total: `R$ ${total.toFixed(2).replace('.', ',')}`,
           };
@@ -68,47 +73,96 @@ export default function ProdutosCadastradosPage() {
     carregarProdutos();
   }, []);
 
-  // Cálculos automáticos para os Cards Coloridos baseados no estado (agora com dados reais)
-  const qtdMenosDe10 = produtos.filter((p) => p.quantidade < 10).length;
-  const qtdEntre11e20 = produtos.filter((p) => p.quantidade >= 11 && p.quantidade <= 20).length;
-  const qtdMaisDe20 = produtos.filter((p) => p.quantidade > 20).length;
-  const totalProdutos = produtos.length;
+  // --- LÓGICA DE FILTRAGEM (PESQUISA EM TEMPO REAL) ---
+  const produtosFiltrados = produtos.filter((prod) => {
+    const buscaLower = termoBusca.toLowerCase().trim();
+    
+    // 1. Pesquisa por Nome, Marca, Fornecedor ou Código/SKU
+    const bateuTexto = 
+      !termoBusca ||
+      prod.nome.toLowerCase().includes(buscaLower) ||
+      prod.marca.toLowerCase().includes(buscaLower) ||
+      prod.fornecedor.toLowerCase().includes(buscaLower) ||
+      prod.codigo.toLowerCase().includes(buscaLower);
+
+    // 2. Filtro por intervalo de datas
+    let bateuData = true;
+    if (prod.data_cadastro_raw) {
+      const dataCad = new Date(prod.data_cadastro_raw);
+      
+      if (dataInicio) {
+        const dtIni = new Date(dataInicio);
+        dtIni.setHours(0, 0, 0, 0);
+        if (dataCad < dtIni) bateuData = false;
+      }
+
+      if (dataFim) {
+        const dtFim = new Date(dataFim);
+        dtFim.setHours(23, 59, 59, 999);
+        if (dataCad > dtFim) bateuData = false;
+      }
+    }
+
+    return bateuTexto && bateuData;
+  });
+
+  // Função para limpar filtros ("Listar Todos")
+  const handleLimparFiltros = () => {
+    setTermoBusca('');
+    setDataInicio('');
+    setDataFim('');
+  };
+
+  // Cálculos dinâmicos atualizados de acordo com o resultado da pesquisa
+  const qtdMenosDe10 = produtosFiltrados.filter((p) => p.quantidade < 10).length;
+  const qtdEntre11e20 = produtosFiltrados.filter((p) => p.quantidade >= 11 && p.quantidade <= 20).length;
+  const qtdMaisDe20 = produtosFiltrados.filter((p) => p.quantidade > 20).length;
+  const totalProdutos = produtosFiltrados.length;
 
   return (
     <div className="p-8 space-y-6">
       
-      {/* 1. Área de Filtros */}
+      {/* 1. Área de Filtros e Pesquisa */}
       <div className="flex flex-col gap-4">
         <div className="flex gap-4">
           <input 
             type="text" 
-            placeholder="Nome/Marca" 
+            placeholder="Pesquisar por Nome, Marca, Fornecedor ou Código..." 
+            value={termoBusca}
+            onChange={(e) => setTermoBusca(e.target.value)}
             className="border border-gray-300 rounded-md px-4 py-2 w-96 text-sm focus:outline-none focus:border-[#0a1f3e]"
           />
           
           <div className="flex items-center">
             <input 
               type="date" 
-              className="border border-gray-300 rounded-md px-4 py-2 w-40 text-sm focus:outline-none focus:border-[#0a1f3e] text-gray-500"
+              value={dataInicio}
+              onChange={(e) => setDataInicio(e.target.value)}
+              className="border border-gray-300 rounded-md px-4 py-2 w-40 text-sm focus:outline-none focus:border-[#0a1f3e] text-gray-700"
             />
           </div>
 
           <div className="flex items-center">
             <input 
               type="date" 
-              className="border border-gray-300 rounded-md px-4 py-2 w-40 text-sm focus:outline-none focus:border-[#0a1f3e] text-gray-500"
+              value={dataFim}
+              onChange={(e) => setDataFim(e.target.value)}
+              className="border border-gray-300 rounded-md px-4 py-2 w-40 text-sm focus:outline-none focus:border-[#0a1f3e] text-gray-700"
             />
           </div>
         </div>
 
         <div>
-          <button className="bg-[#0a1f3e] text-white px-6 py-2 rounded-md font-semibold text-sm hover:bg-[#15305c] transition">
-            Listar Todos
+          <button 
+            onClick={handleLimparFiltros}
+            className="bg-[#0a1f3e] text-white px-6 py-2 rounded-md font-semibold text-sm hover:bg-[#15305c] transition"
+          >
+            Listar Todos / Limpar
           </button>
         </div>
       </div>
 
-      {/* 2. Cards de Resumo Dinâmicos */}
+      {/* 2. Cards de Resumo (Atualizados com a pesquisa) */}
       <div className="grid grid-cols-2 gap-4">
         <div className="bg-[#ffcdd2] text-[#0a1f3e] p-6 rounded-md shadow-sm border border-[#ef9a9a]">
           <p className="text-xl font-bold"><span className="text-2xl">{qtdMenosDe10}</span> - Produtos com menos de 10 itens no estoque</p>
@@ -120,7 +174,7 @@ export default function ProdutosCadastradosPage() {
           <p className="text-xl font-bold"><span className="text-2xl">{qtdMaisDe20}</span> - Produtos com mais de 20 itens no estoque</p>
         </div>
         <div className="bg-[#a5d6a7] text-[#0a1f3e] p-6 rounded-md shadow-sm border border-[#81c784]">
-          <p className="text-xl font-bold"><span className="text-2xl">{totalProdutos}</span> - Total de Produtos</p>
+          <p className="text-xl font-bold"><span className="text-2xl">{totalProdutos}</span> - Total de Produtos Encontrados</p>
         </div>
       </div>
 
@@ -149,19 +203,21 @@ export default function ProdutosCadastradosPage() {
                   Carregando produtos do banco de dados...
                 </td>
               </tr>
-            ) : produtos.length === 0 ? (
+            ) : produtosFiltrados.length === 0 ? (
               <tr>
                 <td colSpan={11} className="py-8 text-center text-gray-500 font-medium">
-                  Nenhum produto encontrado.
+                  Nenhum produto encontrado para esta pesquisa.
                 </td>
               </tr>
             ) : (
-              produtos.map((prod) => (
+              produtosFiltrados.map((prod) => (
                 <tr key={prod.id} className="hover:bg-gray-50 transition">
                   <td className="py-3 px-4 text-gray-600">{prod.data_cadastro}</td>
                   <td className="py-3 px-4">
                     <div className="w-10 h-10 bg-gray-100 border border-gray-200 rounded flex flex-col items-center justify-center text-[8px] text-gray-400 font-bold text-center leading-tight">
-                      <svg className="w-4 h-4 mb-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                      <svg className="w-4 h-4 mb-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                      </svg>
                       SEM<br/>IMAGEM
                     </div>
                   </td>
@@ -170,8 +226,8 @@ export default function ProdutosCadastradosPage() {
                   <td className="py-3 px-4 font-bold text-gray-700 uppercase">{prod.fornecedor}</td>
                   <td className="py-3 px-4 font-bold text-gray-700 uppercase">{prod.marca}</td>
                   <td className="py-3 px-4 font-bold">
-                    <span className={prod.quantidade < prod.qtd_minima ? 'text-red-500' : 'text-gray-700'}>
-                      {prod.quantidade} Unidade(s)
+                    <span className={prod.quantidade <= prod.qtd_minima ? 'text-red-500' : 'text-gray-700'}>
+                      {prod.quantidade} {prod.unidade}(s)
                     </span>
                   </td>
                   <td className="py-3 px-4 text-red-500 font-semibold">{prod.qtd_minima}</td>
