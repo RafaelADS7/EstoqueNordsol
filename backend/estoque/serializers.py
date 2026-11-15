@@ -15,7 +15,7 @@ class ProdutoSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'nome', 'marca', 'fornecedor', 'categoria',
             'categoria_nome', 'sku_codigo', 'unidade', 'estoque_atual',
-            'quantidade_minima', 'preco_custo', 'valor_total', 'data_cadastro', 'cidade', 'kwh',
+            'quantidade_minima', 'preco_custo', 'valor_total', 'data_cadastro',
         ]
 
     def get_valor_total(self, obj):

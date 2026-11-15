@@ -78,21 +78,6 @@ class Produto(models.Model):
         blank=True
     )
 
-    # NOVOS CAMPOS:
-    cidade = models.CharField(
-        max_length=100,
-        blank=True,
-        null=True
-    )
-
-    kwh = models.DecimalField(
-        max_digits=10,
-        decimal_places=2,
-        default=0,
-        blank=True,
-        null=True,
-        verbose_name="Consumo em kWh"
-    )
 
     class Meta:
         verbose_name_plural = "Produtos"
