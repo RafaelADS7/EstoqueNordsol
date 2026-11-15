@@ -8,25 +8,38 @@ import os
 import dj_database_url
 
 
-# Caminho principal do projeto
+# ==========================================
+# CAMINHO PRINCIPAL DO PROJETO
+# ==========================================
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 
-# Segurança
+# ==========================================
+# SEGURANÇA
+# ==========================================
+
 SECRET_KEY = os.getenv(
     'SECRET_KEY',
     'django-insecure-chave-apenas-para-desenvolvimento-local'
 )
 
-DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'
+DEBUG = os.getenv('DEBUG', 'False').lower() == 'true'
 
-ALLOWED_HOSTS = os.getenv(
-    'ALLOWED_HOSTS',
-    'localhost,127.0.0.1'
-).split(',')
+ALLOWED_HOSTS = [
+    host.strip()
+    for host in os.getenv(
+        'ALLOWED_HOSTS',
+        'localhost,127.0.0.1,estoquenordsol.onrender.com'
+    ).split(',')
+    if host.strip()
+]
 
 
-# Aplicações instaladas
+# ==========================================
+# APLICAÇÕES INSTALADAS
+# ==========================================
+
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
@@ -42,7 +55,10 @@ INSTALLED_APPS = [
 ]
 
 
-# Middlewares
+# ==========================================
+# MIDDLEWARES
+# ==========================================
+
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
@@ -56,7 +72,10 @@ MIDDLEWARE = [
 ]
 
 
-# Configuração principal
+# ==========================================
+# CONFIGURAÇÃO PRINCIPAL
+# ==========================================
+
 ROOT_URLCONF = 'core.urls'
 
 TEMPLATES = [
@@ -77,7 +96,10 @@ TEMPLATES = [
 WSGI_APPLICATION = 'core.wsgi.application'
 
 
-# Banco de dados
+# ==========================================
+# BANCO DE DADOS
+# ==========================================
+
 # Local: SQLite
 # Produção: PostgreSQL do Supabase
 
@@ -88,7 +110,7 @@ if DATABASE_URL:
         'default': dj_database_url.parse(
             DATABASE_URL,
             conn_max_age=600,
-            conn_health_checks=True
+            conn_health_checks=True,
         )
     }
 else:
@@ -100,7 +122,10 @@ else:
     }
 
 
-# Validação de senhas
+# ==========================================
+# VALIDAÇÃO DE SENHAS
+# ==========================================
+
 AUTH_PASSWORD_VALIDATORS = [
     {
         'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
@@ -114,10 +139,16 @@ AUTH_PASSWORD_VALIDATORS = [
     {
         'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
     },
+    {
+        'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
+    },
 ]
 
 
-# Internacionalização
+# ==========================================
+# INTERNACIONALIZAÇÃO
+# ==========================================
+
 LANGUAGE_CODE = 'pt-br'
 
 TIME_ZONE = 'America/Fortaleza'
@@ -127,20 +158,51 @@ USE_I18N = True
 USE_TZ = True
 
 
-# Arquivos estáticos
+# ==========================================
+# ARQUIVOS ESTÁTICOS
+# ==========================================
+
 STATIC_URL = 'static/'
 
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
+STORAGES = {
+    'default': {
+        'BACKEND': 'django.core.files.storage.FileSystemStorage',
+    },
+    'staticfiles': {
+        'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage',
+    },
+}
 
-# CORS
-# Por enquanto, somente os endereços locais do Next.js
+
+# ==========================================
+# CORS - NEXT.JS / VERCEL
+# ==========================================
 
 CORS_ALLOWED_ORIGINS = [
     'http://localhost:3000',
     'http://127.0.0.1:3000',
+    'https://estoque-nordsol.vercel.app',
 ]
 
 
-# Chave padrão dos modelos
+# ==========================================
+# SEGURANÇA EM PRODUÇÃO
+# ==========================================
+
+SECURE_PROXY_SSL_HEADER = (
+    'HTTP_X_FORWARDED_PROTO',
+    'https'
+)
+
+SESSION_COOKIE_SECURE = not DEBUG
+
+CSRF_COOKIE_SECURE = not DEBUG
+
+
+# ==========================================
+# CHAVE PADRÃO DOS MODELOS
+# ==========================================
+
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'

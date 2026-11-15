@@ -1,338 +1,273 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { useParams, useRouter } from 'next/navigation';
+import { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useParams, useRouter } from 'next/navigation';
 
-// --- TIPAGENS ---
-interface ProdutoDisponivel {
-  id: string | number;
+const API_URL = (process.env.NEXT_PUBLIC_API_URL || 'https://estoquenordsol.onrender.com').replace(/\/$/, '');
+const API = `${API_URL}/api`;
+
+type ID = string | number;
+
+interface ProdutoBackend {
+  id: ID;
   nome: string;
-  valor_unitario: number;
-  unidade: string;
+  preco_custo?: string | number;
+  unidade?: string;
 }
 
-interface ItemKit {
-  produto_id: string | number;
+interface ItemKitBackend {
+  id: ID;
+  produto: ID;
+  quantidade_padrao: number | string;
+  produto_detalhes?: ProdutoBackend;
+}
+
+interface KitBackend {
+  id: ID;
+  nome_kit: string;
+  descricao: string;
+  itens: ItemKitBackend[];
+}
+
+interface ItemKitTela {
+  id?: ID;
+  produto_id: ID;
   nome: string;
   quantidade: number;
   unidade: string;
   valor_unitario: number;
-  total: number;
+}
+
+async function lerResposta(response: Response) {
+  const texto = await response.text();
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}: ${texto.slice(0, 500) || response.statusText}`);
+  }
+  return texto ? JSON.parse(texto) : null;
+}
+
+function listaDaApi<T>(dados: unknown): T[] {
+  if (Array.isArray(dados)) return dados as T[];
+  if (dados && typeof dados === 'object' && 'results' in dados && Array.isArray(dados.results)) {
+    return dados.results as T[];
+  }
+  throw new Error('A API não retornou uma lista válida.');
 }
 
 export default function EditarKitPage() {
   const params = useParams();
   const router = useRouter();
-  const kitId = params.id; 
+  const kitId = Array.isArray(params.id) ? params.id[0] : params.id;
 
-  // --- ESTADOS DA PÁGINA ---
   const [carregandoDados, setCarregandoDados] = useState(true);
   const [salvando, setSalvando] = useState(false);
-
-  // Formulário do Kit (Ajustado para o seu models.py)
+  const [erro, setErro] = useState<string | null>(null);
   const [nomeKit, setNomeKit] = useState('');
   const [descricaoKit, setDescricaoKit] = useState('');
-  
-  // Itens e Produtos
-  const [itensDoKit, setItensDoKit] = useState<ItemKit[]>([]);
-  const [produtosDisponiveis, setProdutosDisponiveis] = useState<ProdutoDisponivel[]>([]);
-  const [produtoSelecionado, setProdutoSelecionado] = useState<string>('');
-  const [quantidadeSelecionada, setQuantidadeSelecionada] = useState<number>(1);
+  const [itensDoKit, setItensDoKit] = useState<ItemKitTela[]>([]);
+  const [itensOriginais, setItensOriginais] = useState<ItemKitBackend[]>([]);
+  const [produtosDisponiveis, setProdutosDisponiveis] = useState<ProdutoBackend[]>([]);
+  const [produtoSelecionado, setProdutoSelecionado] = useState('');
+  const [quantidadeSelecionada, setQuantidadeSelecionada] = useState('1');
 
-  // --- CARREGAR DADOS DO SERVIDOR ---
-  useEffect(() => {
-    const carregarDadosIniciais = async () => {
-      try {
-        setCarregandoDados(true);
-
-        // 1. Busca produtos (lendo preco_custo do Django)
-        const resProdutos = await fetch('http://localhost:8000/api/produtos/');
-        if (!resProdutos.ok) throw new Error('Erro ao buscar produtos.');
-        const dataProdutos = await resProdutos.json();
-        const listaProdutos = dataProdutos.results ? dataProdutos.results : dataProdutos;
-        
-        const produtosFormatados = listaProdutos.map((p: any) => ({
-          id: p.id,
-          nome: p.nome,
-          valor_unitario: Number(p.preco_custo || 0), 
-          unidade: p.unidade || 'UN'
-        }));
-        setProdutosDisponiveis(produtosFormatados);
-
-        // 2. Busca o Kit Específico
-        const resKit = await fetch(`http://localhost:8000/api/kits/${kitId}/`);
-        if (!resKit.ok) throw new Error('Erro ao buscar detalhes do kit.');
-        const kitData = await resKit.json();
-
-        setNomeKit(kitData.nome_kit || '');
-        setDescricaoKit(kitData.descricao || '');
-        
-        const itensDoBackend = kitData.itens || [];
-
-        // 3. Mapeamento dos itens do Kit
-        const itensMapeados = itensDoBackend.map((item: any) => {
-          const prodId = item.produto; 
-
-          const produtoOriginal = produtosFormatados.find(
-            (p: any) => p.id?.toString() === prodId?.toString()
-          );
-
-          // O Django manda a quantidade como "quantidade_padrao"
-          const qtd = Number(item.quantidade_padrao || 1);
-          
-          const valorUnit = produtoOriginal 
-            ? produtoOriginal.valor_unitario 
-            : Number(item.produto_detalhes?.preco_custo || 0);
-
-          return {
-            produto_id: prodId,
-            nome: produtoOriginal ? produtoOriginal.nome : (item.produto_detalhes?.nome || 'Produto Desconhecido'),
-            quantidade: qtd,
-            unidade: produtoOriginal ? produtoOriginal.unidade : (item.produto_detalhes?.unidade || 'UN'),
-            valor_unitario: valorUnit,
-            total: qtd * valorUnit
-          };
-        });
-
-        setItensDoKit(itensMapeados);
-
-      } catch (erro) {
-        console.error("Erro ao carregar dados do kit:", erro);
-        alert("Aviso: Falha na conexão com a API.");
-      } finally {
-        setCarregandoDados(false);
-      }
-    };
-
-    if (kitId) carregarDadosIniciais();
+  const carregarDados = useCallback(async () => {
+    if (!kitId) return;
+    setCarregandoDados(true);
+    setErro(null);
+    try {
+      const [resProdutos, resKit] = await Promise.all([
+        fetch(`${API}/produtos/`, { cache: 'no-store' }),
+        fetch(`${API}/kits/${encodeURIComponent(kitId)}/`, { cache: 'no-store' }),
+      ]);
+      const [dadosProdutos, kit] = await Promise.all([
+        lerResposta(resProdutos),
+        lerResposta(resKit) as Promise<KitBackend>,
+      ]);
+      const produtos = listaDaApi<ProdutoBackend>(dadosProdutos);
+      setProdutosDisponiveis(produtos);
+      setNomeKit(kit.nome_kit ?? '');
+      setDescricaoKit(kit.descricao ?? '');
+      const originais = kit.itens ?? [];
+      setItensOriginais(originais);
+      setItensDoKit(originais.map((item) => {
+        const produto = produtos.find((p) => String(p.id) === String(item.produto)) ?? item.produto_detalhes;
+        return {
+          id: item.id,
+          produto_id: item.produto,
+          nome: produto?.nome ?? 'Produto desconhecido',
+          quantidade: Number(item.quantidade_padrao),
+          unidade: produto?.unidade ?? 'UN',
+          valor_unitario: Number(produto?.preco_custo ?? 0),
+        };
+      }));
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : 'Erro ao carregar os dados do kit.');
+    } finally {
+      setCarregandoDados(false);
+    }
   }, [kitId]);
 
-  // --- LÓGICA DE MANIPULAÇÃO DOS ITENS ---
-  const handleAdicionarItem = () => {
-    if (!produtoSelecionado || quantidadeSelecionada <= 0) {
-      alert('Selecione um produto e uma quantidade válida.');
+  useEffect(() => { void carregarDados(); }, [carregarDados]);
+
+  const formatarMoeda = (valor: number) =>
+    valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
+
+  const adicionarItem = () => {
+    const qtd = Number(quantidadeSelecionada);
+    if (!produtoSelecionado || !Number.isFinite(qtd) || qtd <= 0) {
+      alert('Selecione um produto e informe uma quantidade válida maior que zero.');
       return;
     }
-
-    const produto = produtosDisponiveis.find(p => p.id.toString() === produtoSelecionado);
+    const produto = produtosDisponiveis.find((p) => String(p.id) === produtoSelecionado);
     if (!produto) return;
-
-    const itemExistente = itensDoKit.find(i => i.produto_id.toString() === produtoSelecionado);
-    
-    if (itemExistente) {
-      setItensDoKit(itensDoKit.map(item => {
-        if (item.produto_id.toString() === produtoSelecionado) {
-          const novaQtd = Number(item.quantidade) + Number(quantidadeSelecionada);
-          return { ...item, quantidade: novaQtd, total: novaQtd * item.valor_unitario };
-        }
-        return item;
-      }));
-    } else {
-      setItensDoKit([...itensDoKit, {
+    setItensDoKit((atuais) => {
+      const existente = atuais.find((i) => String(i.produto_id) === produtoSelecionado);
+      if (existente) {
+        return atuais.map((item) => String(item.produto_id) === produtoSelecionado
+          ? { ...item, quantidade: item.quantidade + qtd }
+          : item);
+      }
+      return [...atuais, {
         produto_id: produto.id,
         nome: produto.nome,
-        quantidade: Number(quantidadeSelecionada),
-        unidade: produto.unidade,
-        valor_unitario: produto.valor_unitario,
-        total: Number(quantidadeSelecionada) * produto.valor_unitario
-      }]);
-    }
-
+        quantidade: qtd,
+        unidade: produto.unidade ?? 'UN',
+        valor_unitario: Number(produto.preco_custo ?? 0),
+      }];
+    });
     setProdutoSelecionado('');
-    setQuantidadeSelecionada(1);
+    setQuantidadeSelecionada('1');
   };
 
-  const handleRemoverItem = (produto_id: string | number) => {
-    setItensDoKit(itensDoKit.filter(item => item.produto_id !== produto_id));
+  const removerItem = (produtoId: ID) => {
+    setItensDoKit((atuais) => atuais.filter((i) => String(i.produto_id) !== String(produtoId)));
   };
 
-  const calcularValorTotalKit = () => {
-    return itensDoKit.reduce((total, item) => total + item.total, 0);
-  };
-
-  // --- SUBMIT: SALVAR ALTERAÇÕES ---
-  const handleSalvarAlteracoes = async () => {
-    if (!nomeKit || itensDoKit.length === 0) {
-      alert('O kit precisa de um nome e de pelo menos um produto adicionado.');
-      return;
+  const salvarAlteracoes = async () => {
+    if (salvando || !kitId) return;
+    if (!nomeKit.trim()) { alert('Informe o nome do kit.'); return; }
+    if (itensDoKit.some((i) => !Number.isFinite(i.quantidade) || i.quantidade <= 0)) {
+      alert('Existem quantidades inválidas.'); return;
     }
-
-    // Payload estruturado exatamente como o Django KitModeloSerializer espera
-    const payload = {
-      nome_kit: nomeKit,
-      descricao: descricaoKit,
-      itens: itensDoKit.map(item => ({
-        produto: item.produto_id,
-        quantidade_padrao: item.quantidade // Backend chama de quantidade_padrao
-      }))
-    };
-
+    setSalvando(true);
+    setErro(null);
     try {
-      setSalvando(true);
-      
-      const response = await fetch(`http://localhost:8000/api/kits/${kitId}/`, {
-        method: 'PUT',
+      // O serializer do kit ignora `itens` (read_only=True).
+      await lerResposta(await fetch(`${API}/kits/${encodeURIComponent(kitId)}/`, {
+        method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-      });
+        body: JSON.stringify({ nome_kit: nomeKit.trim(), descricao: descricaoKit.trim() }),
+      }));
 
-      if (!response.ok) throw new Error('Erro ao atualizar kit no servidor.');
+      const atuaisPorProduto = new Map(itensDoKit.map((item) => [String(item.produto_id), item]));
+
+      // Exclui somente os itens que o usuário removeu.
+      for (const original of itensOriginais) {
+        if (!atuaisPorProduto.has(String(original.produto))) {
+          await lerResposta(await fetch(`${API}/itens-kit/${original.id}/`, { method: 'DELETE' }));
+        }
+      }
+
+      // Atualiza quantidades existentes e cria somente produtos novos.
+      for (const item of itensDoKit) {
+        const original = itensOriginais.find((i) => String(i.produto) === String(item.produto_id));
+        if (original) {
+          if (Number(original.quantidade_padrao) !== item.quantidade) {
+            await lerResposta(await fetch(`${API}/itens-kit/${original.id}/`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ quantidade_padrao: item.quantidade }),
+            }));
+          }
+        } else {
+          await lerResposta(await fetch(`${API}/itens-kit/`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ kit: kitId, produto: item.produto_id, quantidade_padrao: item.quantidade }),
+          }));
+        }
+      }
 
       alert('Kit atualizado com sucesso!');
-      router.push('/estoque/kits'); 
-    } catch (erro) {
-      console.error("Erro ao salvar alterações:", erro);
-      alert("Aviso: Houve um problema ao comunicar com o servidor.");
+      router.push('/estoque/kits');
+      router.refresh();
+    } catch (e) {
+      const mensagem = e instanceof Error ? e.message : 'Erro ao salvar o kit.';
+      setErro(`Não foi possível concluir todas as alterações. Algumas podem ter sido salvas. ${mensagem}`);
+      // Sincroniza com o servidor para evitar repetir operações já concluídas.
+      await carregarDados();
     } finally {
       setSalvando(false);
     }
   };
 
-  const formatarMoeda = (valor: number) => {
-    return valor.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
-  };
+  const totalKit = itensDoKit.reduce((soma, item) => soma + item.quantidade * item.valor_unitario, 0);
 
   if (carregandoDados) {
-    return (
-      <div className="p-8 text-center text-gray-500 font-medium mt-20">
-        Carregando informações do Kit #{kitId}...
-      </div>
-    );
+    return <div className="p-8 text-center text-gray-500">Carregando informações do kit...</div>;
   }
 
   return (
     <div className="p-8 max-w-6xl mx-auto space-y-6">
-      
-      {/* CABEÇALHO */}
-      <div className="flex justify-between items-center border-b pb-4">
+      <div className="flex flex-wrap justify-between items-center border-b pb-4 gap-4">
         <div>
-          <Link href="/estoque/kits" className="text-sm text-blue-500 hover:underline flex items-center gap-1 mb-1">
-            ← Voltar para listagem
-          </Link>
-          <h1 className="text-2xl font-bold text-[#0a1f3e]">Editar Kit Modelo</h1>
+          <Link href="/estoque/kits" className="text-sm text-blue-600 hover:underline">← Voltar para listagem</Link>
+          <h1 className="text-2xl font-bold text-[#0a1f3e]">Editar Kit Modelo #{kitId}</h1>
         </div>
-        <button 
-          onClick={handleSalvarAlteracoes}
-          disabled={salvando}
-          className="bg-green-600 text-white px-6 py-2.5 rounded text-sm font-bold hover:bg-green-700 transition shadow-sm disabled:bg-gray-400"
-        >
-          {salvando ? 'A guardar...' : 'Salvar Alterações'}
+        <button onClick={salvarAlteracoes} disabled={salvando || !!erro} className="bg-[#0a1f3e] text-white px-6 py-2.5 rounded font-bold disabled:opacity-50">
+          {salvando ? 'Salvando...' : 'Salvar Alterações'}
         </button>
       </div>
 
-      {/* DADOS BÁSICOS DO FORMULÁRIO */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-white p-6 rounded-md border border-gray-200 shadow-sm">
-        <div>
-          <label className="block text-xs font-semibold text-gray-600 mb-1">Nome do Kit *</label>
-          <input 
-            type="text" 
-            value={nomeKit}
-            onChange={(e) => setNomeKit(e.target.value)}
-            className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[#0a1f3e]"
-          />
-        </div>
-        <div>
-          <label className="block text-xs font-semibold text-gray-600 mb-1">Descrição</label>
-          <input 
-            type="text" 
-            value={descricaoKit}
-            placeholder="Ex: Kit Fixo ou Kit Ligação Aérea"
-            onChange={(e) => setDescricaoKit(e.target.value)}
-            className="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[#0a1f3e]"
-          />
-        </div>
+      {erro && <div role="alert" className="bg-red-100 text-red-800 border border-red-300 p-4 rounded">
+        <p>{erro}</p>
+        <button onClick={carregarDados} className="mt-2 underline font-semibold">Tentar carregar novamente</button>
+      </div>}
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-white p-6 rounded border shadow-sm">
+        <label className="text-sm font-semibold">Nome do Kit *
+          <input value={nomeKit} onChange={(e) => setNomeKit(e.target.value)} className="mt-1 w-full border rounded px-3 py-2 font-normal" />
+        </label>
+        <label className="text-sm font-semibold">Descrição
+          <input value={descricaoKit} onChange={(e) => setDescricaoKit(e.target.value)} className="mt-1 w-full border rounded px-3 py-2 font-normal" />
+        </label>
       </div>
 
-      {/* COMPOSIÇÃO DOS PRODUTOS DO KIT */}
-      <div className="bg-white p-6 rounded-md border border-gray-200 shadow-sm space-y-4">
-        <h3 className="text-md font-bold text-gray-800 border-b pb-2">Composição Atual dos Itens</h3>
-        
-        {/* Adicionar novos itens dentro do Kit */}
-        <div className="flex gap-4 items-end bg-gray-50 p-4 rounded border border-gray-100">
-          <div className="flex-1">
-            <label className="block text-xs font-semibold text-gray-600 mb-1">Incluir Novo Produto</label>
-            <select 
-              value={produtoSelecionado}
-              onChange={(e) => setProdutoSelecionado(e.target.value)}
-              className="w-full bg-white border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[#0a1f3e]"
-            >
+      <div className="bg-white p-6 rounded border shadow-sm space-y-4">
+        <h2 className="font-bold text-gray-800 border-b pb-2">Composição dos produtos do kit</h2>
+        <div className="flex flex-wrap gap-3 items-end bg-gray-50 p-4 rounded">
+          <label className="flex-1 min-w-48 text-sm font-semibold">Incluir produto
+            <select value={produtoSelecionado} onChange={(e) => setProdutoSelecionado(e.target.value)} className="mt-1 w-full border rounded px-3 py-2 bg-white font-normal">
               <option value="">Selecione para adicionar...</option>
-              {produtosDisponiveis.map(p => (
-                <option key={p.id} value={p.id}>
-                  {p.nome} — {formatarMoeda(p.valor_unitario)} / {p.unidade}
-                </option>
-              ))}
+              {produtosDisponiveis.map((p) => <option key={p.id} value={p.id}>{p.nome} — {formatarMoeda(Number(p.preco_custo ?? 0))} / {p.unidade ?? 'UN'}</option>)}
             </select>
-          </div>
-          <div className="w-32">
-            <label className="block text-xs font-semibold text-gray-600 mb-1">Quantidade</label>
-            <input 
-              type="number" 
-              min="1"
-              value={quantidadeSelecionada}
-              onChange={(e) => setQuantidadeSelecionada(Number(e.target.value))}
-              className="w-full bg-white border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:border-[#0a1f3e]"
-            />
-          </div>
-          <button 
-            onClick={handleAdicionarItem}
-            className="bg-green-600 text-white px-5 py-2 rounded-md font-semibold text-sm hover:bg-green-700 transition"
-          >
-            Adicionar
-          </button>
+          </label>
+          <label className="w-32 text-sm font-semibold">Quantidade
+            <input type="number" min="0.01" step="0.01" value={quantidadeSelecionada} onChange={(e) => setQuantidadeSelecionada(e.target.value)} className="mt-1 w-full border rounded px-3 py-2 font-normal" />
+          </label>
+          <button onClick={adicionarItem} className="bg-[#0a1f3e] text-white px-5 py-2 rounded font-semibold">Adicionar</button>
         </div>
-
-        {/* Tabela de Produtos que pertencem a esse Kit */}
-        <div className="border border-gray-200 rounded-md overflow-hidden">
-          <table className="w-full text-xs text-left">
-            <thead className="bg-gray-100 text-gray-700 font-bold border-b border-gray-200">
-              <tr>
-                <th className="py-3 px-4">Produto</th>
-                <th className="py-3 px-4 text-center">Quantidade</th>
-                <th className="py-3 px-4 text-right">Valor Unitário</th>
-                <th className="py-3 px-4 text-right">Total</th>
-                <th className="py-3 px-4 text-center">Ação</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {itensDoKit.length === 0 ? (
-                <tr>
-                  <td colSpan={5} className="py-8 text-center text-gray-400 italic">Este kit não possui nenhum produto na sua composição. Adicione acima!</td>
-                </tr>
-              ) : (
-                itensDoKit.map((item, index) => (
-                  <tr key={index} className="hover:bg-gray-50 transition">
-                    <td className="py-3 px-4 font-semibold text-gray-800">{item.nome}</td>
-                    <td className="py-3 px-4 text-center text-gray-700">{item.quantidade} {item.unidade}</td>
-                    <td className="py-3 px-4 text-right text-gray-600">{formatarMoeda(item.valor_unitario)}</td>
-                    <td className="py-3 px-4 text-right font-bold text-gray-800">{formatarMoeda(item.total)}</td>
-                    <td className="py-3 px-4 text-center">
-                      <button 
-                        onClick={() => handleRemoverItem(item.produto_id)}
-                        className="text-red-500 hover:text-red-700 font-bold px-2 py-1 text-sm"
-                        title="Remover produto do kit"
-                      >
-                        ✕
-                      </button>
-                    </td>
-                  </tr>
-                ))
-              )}
+        <div className="overflow-x-auto border rounded">
+          <table className="w-full text-sm text-left">
+            <thead className="bg-gray-100"><tr>
+              <th className="p-3">Produto</th><th className="p-3 text-center">Quantidade</th><th className="p-3 text-right">Valor Unitário</th><th className="p-3 text-right">Total</th><th className="p-3 text-center">Ação</th>
+            </tr></thead>
+            <tbody className="divide-y">
+              {itensDoKit.length === 0 ? <tr><td colSpan={5} className="p-8 text-center text-gray-500">Este kit não possui produtos.</td></tr> :
+                itensDoKit.map((item) => <tr key={String(item.produto_id)}>
+                  <td className="p-3 font-semibold">{item.nome}</td>
+                  <td className="p-3 text-center">{item.quantidade} {item.unidade}</td>
+                  <td className="p-3 text-right">{formatarMoeda(item.valor_unitario)}</td>
+                  <td className="p-3 text-right font-bold">{formatarMoeda(item.quantidade * item.valor_unitario)}</td>
+                  <td className="p-3 text-center"><button onClick={() => removerItem(item.produto_id)} className="text-red-600 font-bold" title="Remover produto">✕</button></td>
+                </tr>)}
             </tbody>
           </table>
         </div>
-        
-        {/* Totalizador inferior */}
-        <div className="flex justify-end pt-2">
-          <div className="bg-gray-50 px-6 py-4 rounded-md border border-gray-200 flex items-center gap-6">
-            <span className="text-gray-600 text-sm font-semibold">Custo Total do Kit:</span>
-            <span className="text-xl font-bold text-[#0a1f3e]">{formatarMoeda(calcularValorTotalKit())}</span>
-          </div>
-        </div>
-
+        <div className="text-right font-bold text-lg text-[#0a1f3e]">Custo Total do Kit: {formatarMoeda(totalKit)}</div>
+        <p className="text-xs text-gray-500">Valores estimados com base no preço de custo atual dos produtos.</p>
       </div>
-
     </div>
   );
 }
