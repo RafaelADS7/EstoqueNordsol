@@ -1,0 +1,36 @@
+
+# Ambientes virtuais
+venv/
+env/
+.venv/
+
+# Banco de dados local
+db.sqlite3
+*.sqlite3
+
+# Variáveis de ambiente
+.env
+.env.*
+!.env.example
+
+# Arquivos temporários Python
+__pycache__/
+*.pyc
+*.pyo
+
+# VS Code
+.vscode/
+
+# Next.js
+node_modules/
+.next/
+out/
+
+# Django
+staticfiles/
+
+# Backup local
+backend_backup/
+
+# Logs
+*.log
