@@ -11,9 +11,8 @@ import { useEffect, useState } from 'react';
 // Localmente, usa o Django na porta 8000.
 const API_URL = (
   process.env.NEXT_PUBLIC_API_URL ||
-  'http://127.0.0.1:8000'
+  'https://estoquenordsol.onrender.com'
 ).replace(/\/$/, '');
-
 // ==========================================
 // TIPAGENS
 // ==========================================
